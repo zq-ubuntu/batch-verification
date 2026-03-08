@@ -1,6 +1,9 @@
 import cv2
-import pytesseract
-import numpy as np
+import easyocr
+import re
+
+print("Initializing EasyOCR Model...")
+reader = easyocr.Reader(["en"])
 
 
 def get_cropped_roi(image):
@@ -14,55 +17,41 @@ def get_cropped_roi(image):
     return cropped
 
 
-def preprocess_image(image):
-    # 1. Upscale the image by 2x
-    image = cv2.resize(image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-
-    # 2. Convert to Grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # 3. Apply a very slight blur
-    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    # 4. Adaptive Thresholding (Inverted)
-    binary = cv2.adaptiveThreshold(
-        blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-    )
-
-    # 5. Morphological Dilation (Smudging the dot-matrix dots together)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    dilated = cv2.dilate(binary, kernel, iterations=1)
-
-    # 6. Invert back to black text on white background
-    final_processed = cv2.bitwise_not(dilated)
-
-    # 7. Add a 20-pixel white border (Fixed: single value 255 for grayscale)
-    final_processed = cv2.copyMakeBorder(
-        final_processed, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255
-    )
-
-    return final_processed
+def extract_text_easyocr(image):
+    print("Running EasyOCR on the cropped area...")
+    results = reader.readtext(image, detail=0)
+    text = " ".join(results)
+    return text
 
 
-def extract_text(processed_image):
-    print("Running OCR on the cropped area...")
+def validate_batch_number(extracted_text, expected_batch):
+    # 1. Regex Clean: Remove everything that is NOT A-Z or 0-9, and make uppercase
+    cleaned_extracted = re.sub(r"[^A-Z0-9]", "", extracted_text.upper())
+    cleaned_expected = re.sub(r"[^A-Z0-9]", "", expected_batch.upper())
 
-    # Try the strict single-line configuration first
-    custom_config = r"--oem 3 --psm 7"
+    # 2. Check for an exact clean match
+    match = cleaned_extracted == cleaned_expected
 
-    try:
-        text = pytesseract.image_to_string(processed_image, config=custom_config)
-        return text
-    except pytesseract.pytesseract.TesseractError:
-        print("Tesseract crashed on psm 7 (no text found). Falling back to psm 6...")
-        # Fallback to the uniform block configuration which handles empty reads better
-        fallback_config = r"--oem 3 --psm 6"
-        text = pytesseract.image_to_string(processed_image, config=fallback_config)
-        return text
+    # 3. Build the response payload (This is what your DMO will eventually read)
+    response = {
+        "raw_ocr": extracted_text,
+        "cleaned_extracted": cleaned_extracted,
+        "expected_batch": cleaned_expected,
+        "match": match,
+        "alert_required": not match,
+    }
+
+    return response
 
 
 if __name__ == "__main__":
     image_path = "sample-batch.jpg"
+
+    # --- MOCK DMO DATA ---
+    # Change this to whatever the batch number on your sample photo ACTUALLY is
+    EXPECTED_BATCH_FROM_DMO = "BEST BEFORE END 0427 599698-02"
+    # ---------------------
+
     original_image = cv2.imread(image_path)
 
     if original_image is None:
@@ -71,16 +60,28 @@ if __name__ == "__main__":
         cropped_img = get_cropped_roi(original_image)
 
         if cropped_img.size != 0:
-            processed_crop = preprocess_image(cropped_img)
-            extracted_batch = extract_text(processed_crop)
+            extracted_text = extract_text_easyocr(cropped_img)
 
-            print("\n--- OCR EXTRACTION RESULTS ---")
-            print(f"Raw Extracted Text:\n{extracted_batch}")
-            print("------------------------------\n")
+            # Run the Day 4 Validation Logic
+            validation_results = validate_batch_number(
+                extracted_text, EXPECTED_BATCH_FROM_DMO
+            )
+
+            print("\n--- DAY 4: VALIDATION RESULTS ---")
+            print(f"1. Raw OCR Found      : '{validation_results['raw_ocr']}'")
+            print(
+                f"2. Cleaned Extracted  : '{validation_results['cleaned_extracted']}'"
+            )
+            print(f"3. Expected by DMO    : '{validation_results['expected_batch']}'")
+            print("---------------------------------")
+            if validation_results["match"]:
+                print("✅ MATCH SUCCESSFUL. No alert needed.")
+            else:
+                print("❌ MISMATCH DETECTED. Triggering DMO Alert!")
+            print("---------------------------------\n")
 
             cv2.imshow("Cropped Original", cropped_img)
-            cv2.imshow("Processed Crop for OCR", processed_crop)
-            print("Press 'q' or 'ESC' in any window to close.")
+            print("Press 'q' or 'ESC' in the image window to close.")
             cv2.waitKey(0)
             cv2.destroyAllWindows()
         else:
