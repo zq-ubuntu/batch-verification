@@ -1,6 +1,7 @@
 import cv2
 import easyocr
 import re
+import difflib  # <-- NEW IMPORT
 
 print("Initializing EasyOCR Model...")
 reader = easyocr.Reader(["en"])
@@ -25,18 +26,26 @@ def extract_text_easyocr(image):
 
 
 def validate_batch_number(extracted_text, expected_batch):
-    # 1. Regex Clean: Remove everything that is NOT A-Z or 0-9, and make uppercase
+    # 1. Regex Clean: Remove weird symbols
     cleaned_extracted = re.sub(r"[^A-Z0-9]", "", extracted_text.upper())
     cleaned_expected = re.sub(r"[^A-Z0-9]", "", expected_batch.upper())
 
-    # 2. Check for an exact clean match
-    match = cleaned_extracted == cleaned_expected
+    # 2. Calculate Fuzzy Similarity Score (0.0 to 1.0)
+    similarity_ratio = difflib.SequenceMatcher(
+        None, cleaned_extracted, cleaned_expected
+    ).ratio()
 
-    # 3. Build the response payload (This is what your DMO will eventually read)
+    # 3. Define our threshold (e.g., 80% similar is considered a pass)
+    # You can tweak this number up or down depending on how strict you want to be
+    THRESHOLD = 0.80
+    match = similarity_ratio >= THRESHOLD
+
+    # 4. Build the response payload
     response = {
         "raw_ocr": extracted_text,
         "cleaned_extracted": cleaned_extracted,
         "expected_batch": cleaned_expected,
+        "confidence_score": round(similarity_ratio * 100, 2),  # Convert to percentage
         "match": match,
         "alert_required": not match,
     }
@@ -48,8 +57,9 @@ if __name__ == "__main__":
     image_path = "sample-batch.jpg"
 
     # --- MOCK DMO DATA ---
-    # Change this to whatever the batch number on your sample photo ACTUALLY is
-    EXPECTED_BATCH_FROM_DMO = "BEST BEFORE END 0427 599698-02"
+    EXPECTED_BATCH_FROM_DMO = (
+        "BEST BEFORE END 0427 599698-02"  # Put your actual batch number here
+    )
     # ---------------------
 
     original_image = cv2.imread(image_path)
@@ -62,7 +72,7 @@ if __name__ == "__main__":
         if cropped_img.size != 0:
             extracted_text = extract_text_easyocr(cropped_img)
 
-            # Run the Day 4 Validation Logic
+            # Run the updated Day 4 Fuzzy Validation Logic
             validation_results = validate_batch_number(
                 extracted_text, EXPECTED_BATCH_FROM_DMO
             )
@@ -73,11 +83,16 @@ if __name__ == "__main__":
                 f"2. Cleaned Extracted  : '{validation_results['cleaned_extracted']}'"
             )
             print(f"3. Expected by DMO    : '{validation_results['expected_batch']}'")
+            print(f"4. Match Confidence   : {validation_results['confidence_score']}%")
             print("---------------------------------")
             if validation_results["match"]:
-                print("✅ MATCH SUCCESSFUL. No alert needed.")
+                print(
+                    f"✅ MATCH SUCCESSFUL (Score: {validation_results['confidence_score']}%). No alert needed."
+                )
             else:
-                print("❌ MISMATCH DETECTED. Triggering DMO Alert!")
+                print(
+                    f"❌ MISMATCH DETECTED (Score: {validation_results['confidence_score']}%). Triggering DMO Alert!"
+                )
             print("---------------------------------\n")
 
             cv2.imshow("Cropped Original", cropped_img)
