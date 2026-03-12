@@ -17,13 +17,13 @@
 <!-- REPLACE THE SRC LINKS WITH YOUR ACTUAL LOCAL SCREENSHOT PATHS -->
 
 <p align="center">
-  <img src="screenshots/img-01.jpg" alt="FastAPI Swagger UI showing the /verify endpoint" width="600"/>
+  <img src="screenshot/img-01.jpg" alt="FastAPI Swagger UI showing the /verify endpoint" width="600"/>
   <br>
   <em>Interactive API documentation generated automatically by FastAPI.</em>
 </p>
 
 <p align="center">
-  <img src="screenshots/img-02.jpg" alt="JSON Response" width="600"/>
+  <img src="screenshot/img-02.jpg" alt="JSON Response" width="600"/>
   <br>
   <em>The verification engine catching a mismatch and triggering an alert.</em>
 </p>
